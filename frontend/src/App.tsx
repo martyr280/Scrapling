@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
-import { Send, RotateCcw, FileCode, SlidersHorizontal, Braces, FileText, Terminal, History, Shield, Cookie, Layers } from 'lucide-react'
+import { Send, RotateCcw, FileCode, SlidersHorizontal, Braces } from 'lucide-react'
 import FetcherSelector from './components/FetcherSelector'
 import HeaderEditor from './components/HeaderEditor'
 import OptionsPanel from './components/OptionsPanel'
@@ -35,24 +35,9 @@ const HTTP_METHODS: { value: HttpMethod; label: string; color: string }[] = [
   { value: 'delete', label: 'DELETE', color: 'text-status-error' },
 ]
 
-const HISTORY_STORAGE_KEY = 'scrapling_history'
-const MAX_HISTORY_ITEMS = 20
-
-function loadHistory(): ScrapeHistoryItem[] {
-  try {
-    const stored = localStorage.getItem(HISTORY_STORAGE_KEY)
-    return stored ? JSON.parse(stored) : []
-  } catch {
-    return []
-  }
-}
-
-function saveHistory(history: ScrapeHistoryItem[]) {
-  try {
-    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history.slice(0, MAX_HISTORY_ITEMS)))
-  } catch {
-    // localStorage might be full or disabled
-  }
+interface HealthInfo {
+  available_fetchers: Record<string, boolean>
+  convertor_available: boolean
 }
 
 export default function App() {
@@ -63,16 +48,28 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [configTab, setConfigTab] = useState<ConfigTab>('basic')
   const [headerPairs, setHeaderPairs] = useState<HeaderPair[]>([])
-  const [cookiePairs, setCookiePairs] = useState<HeaderPair[]>([])
-  const [showCurlModal, setShowCurlModal] = useState(false)
-  const [history, setHistory] = useState<ScrapeHistoryItem[]>(loadHistory)
-  const [showHistory, setShowHistory] = useState(false)
-  const [proxyConfig, setProxyConfig] = useState<ProxyConfig>({ ...DEFAULT_PROXY_CONFIG })
+  const [health, setHealth] = useState<HealthInfo | null>(null)
+  const [backendReady, setBackendReady] = useState(false)
 
-  // Save history to localStorage whenever it changes
   useEffect(() => {
-    saveHistory(history)
-  }, [history])
+    let cancelled = false
+    const checkHealth = async () => {
+      try {
+        const res = await fetch('/api/health')
+        if (res.ok && !cancelled) {
+          const data = await res.json()
+          setHealth(data)
+          setBackendReady(true)
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setTimeout(checkHealth, 2000)
+        }
+      }
+    }
+    checkHealth()
+    return () => { cancelled = true }
+  }, [])
 
   const updateRequest = useCallback((updates: Partial<ScrapeRequest>) => {
     setRequest((prev) => ({ ...prev, ...updates }))
@@ -232,21 +229,19 @@ export default function App() {
             <p className="text-[11px] text-zinc-500">Web Scraping Interface</p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowHistory(!showHistory)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors cursor-pointer ${
-              showHistory 
-                ? 'bg-accent text-surface' 
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-surface-200'
-            }`}
-          >
-            <History size={13} />
-            History
-            {history.length > 0 && (
-              <span className="px-1.5 py-0.5 bg-surface-300 rounded text-[10px]">{history.length}</span>
-            )}
-          </button>
+        <div className="flex items-center gap-3">
+          {!backendReady && (
+            <span className="flex items-center gap-1.5 text-xs text-amber-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+              Connecting to backend...
+            </span>
+          )}
+          {backendReady && health && (
+            <span className="flex items-center gap-1.5 text-xs text-emerald-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+              Backend ready
+            </span>
+          )}
           <button
             onClick={handleReset}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 rounded-lg hover:bg-surface-200 transition-colors cursor-pointer"
