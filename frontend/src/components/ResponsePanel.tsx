@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Clock, Copy, Check, FileText, Code, Globe, Cookie } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import StatusBadge from './StatusBadge'
+import ExportMenu from './ExportMenu'
 import type { ScrapeResponse, ScrapeError, ExtractionType } from '../types'
 
 type ResponseTab = 'content' | 'headers' | 'cookies' | 'raw'
@@ -143,7 +144,10 @@ export default function ResponsePanel({ response, error, loading, extractionType
             {response.elapsed}s
           </div>
         </div>
-        <CopyButton text={response.content} />
+        <div className="flex items-center gap-2">
+          <ExportMenu response={response} />
+          <CopyButton text={response.content} />
+        </div>
       </div>
 
       {/* Tabs */}

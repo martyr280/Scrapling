@@ -1,4 +1,5 @@
-import type { ScrapeRequest, FetcherType } from '../types'
+import type { ScrapeRequest, FetcherType, WaitSelectorState } from '../types'
+import AdvancedOptions from './AdvancedOptions'
 
 interface Props {
   request: ScrapeRequest
@@ -136,6 +137,7 @@ function FetcherOptions({ request, onChange }: Props) {
         <Toggle label="HTTP/3" checked={request.http3} onChange={(v) => onChange({ http3: v })} description="May conflict with impersonate" />
         <Toggle label="Stealthy Headers" checked={request.stealthy_headers} onChange={(v) => onChange({ stealthy_headers: v })} description="Add realistic browser headers" />
       </div>
+      <AdvancedOptions request={request} onChange={onChange} />
     </div>
   )
 }
@@ -146,6 +148,18 @@ function DynamicOptions({ request, onChange }: Props) {
       <NumberInput label="Timeout (ms)" value={request.timeout} onChange={(v) => onChange({ timeout: v ?? 30000 })} min={1000} max={300000} />
       <NumberInput label="Wait (ms)" value={request.wait} onChange={(v) => onChange({ wait: v })} min={0} description="Extra time to wait after page load" />
       <TextInput label="Wait for Selector" value={request.wait_selector} onChange={(v) => onChange({ wait_selector: v })} placeholder="CSS selector to wait for" description="Wait until this element appears" />
+      <SelectInput
+        label="Wait Selector State"
+        value={request.wait_selector_state}
+        onChange={(v) => onChange({ wait_selector_state: v as WaitSelectorState })}
+        options={[
+          { label: 'Visible', value: 'visible' },
+          { label: 'Hidden', value: 'hidden' },
+          { label: 'Attached', value: 'attached' },
+          { label: 'Detached', value: 'detached' },
+        ]}
+        description="State to wait for when using wait selector"
+      />
       <TextInput label="Proxy" value={request.proxy} onChange={(v) => onChange({ proxy: v })} placeholder="http://user:pass@host:port" />
       <div className="flex flex-col gap-3 pt-2 border-t border-border">
         <Toggle label="Headless" checked={request.headless} onChange={(v) => onChange({ headless: v })} description="Run browser without visible window" />
@@ -153,6 +167,7 @@ function DynamicOptions({ request, onChange }: Props) {
         <Toggle label="Disable Resources" checked={request.disable_resources} onChange={(v) => onChange({ disable_resources: v })} description="Block images, CSS, fonts" />
         <Toggle label="Google Search" checked={request.google_search} onChange={(v) => onChange({ google_search: v })} description="Navigate via Google search first" />
       </div>
+      <AdvancedOptions request={request} onChange={onChange} />
     </div>
   )
 }
@@ -163,6 +178,18 @@ function StealthyOptions({ request, onChange }: Props) {
       <NumberInput label="Timeout (ms)" value={request.timeout} onChange={(v) => onChange({ timeout: v ?? 30000 })} min={1000} max={300000} />
       <NumberInput label="Wait (ms)" value={request.wait} onChange={(v) => onChange({ wait: v })} min={0} description="Extra time to wait after page load" />
       <TextInput label="Wait for Selector" value={request.wait_selector} onChange={(v) => onChange({ wait_selector: v })} placeholder="CSS selector to wait for" />
+      <SelectInput
+        label="Wait Selector State"
+        value={request.wait_selector_state}
+        onChange={(v) => onChange({ wait_selector_state: v as WaitSelectorState })}
+        options={[
+          { label: 'Visible', value: 'visible' },
+          { label: 'Hidden', value: 'hidden' },
+          { label: 'Attached', value: 'attached' },
+          { label: 'Detached', value: 'detached' },
+        ]}
+        description="State to wait for when using wait selector"
+      />
       <TextInput label="Proxy" value={request.proxy} onChange={(v) => onChange({ proxy: v })} placeholder="http://user:pass@host:port" />
       <div className="flex flex-col gap-3 pt-2 border-t border-border">
         <Toggle label="Headless" checked={request.headless} onChange={(v) => onChange({ headless: v })} description="Run browser without visible window" />
@@ -177,6 +204,7 @@ function StealthyOptions({ request, onChange }: Props) {
         <Toggle label="Block WebRTC" checked={request.block_webrtc} onChange={(v) => onChange({ block_webrtc: v })} description="Prevent IP leak via WebRTC" />
         <Toggle label="Allow WebGL" checked={request.allow_webgl} onChange={(v) => onChange({ allow_webgl: v })} description="Enable WebGL rendering" />
       </div>
+      <AdvancedOptions request={request} onChange={onChange} />
     </div>
   )
 }
