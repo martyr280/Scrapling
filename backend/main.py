@@ -1,55 +1,39 @@
-import sys
-import os
 import time
 import traceback
 
-# Add the project root to Python path so Scrapling can be imported
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-import fastapi
-import fastapi.middleware.cors
-import fastapi.responses
+import httpx
+from bs4 import BeautifulSoup
+from markdownify import markdownify as md
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
 
-app = fastapi.FastAPI()
+app = FastAPI()
 
 app.add_middleware(
-    fastapi.middleware.cors.CORSMiddleware,
+    CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Check which fetchers are available
-AVAILABLE_FETCHERS = {"fetcher": False, "dynamic": False, "stealthy": False}
-
-try:
-    from scrapling.fetchers import Fetcher
-    AVAILABLE_FETCHERS["fetcher"] = True
-except Exception:
-    pass
-
-try:
-    from scrapling.fetchers import DynamicFetcher
-    AVAILABLE_FETCHERS["dynamic"] = True
-except Exception:
-    pass
-
-try:
-    from scrapling.fetchers import StealthyFetcher
-    AVAILABLE_FETCHERS["stealthy"] = True
-except Exception:
-    pass
-
-# Try to import Convertor for content extraction
-CONVERTOR_AVAILABLE = False
-try:
-    from scrapling.engines.toolbelt.convertor import Convertor
-    CONVERTOR_AVAILABLE = True
-except Exception:
-    pass
+# Realistic browser headers matching Scrapling's stealthy_headers approach
+DEFAULT_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Cache-Control": "max-age=0",
+}
 
 
 class ScrapeRequest(BaseModel):
@@ -69,6 +53,7 @@ class ScrapeRequest(BaseModel):
     impersonate: Optional[str] = "chrome"
     http3: bool = False
     stealthy_headers: bool = True
+    # Dynamic/Stealthy options (noted but not used with httpx backend)
     headless: bool = True
     network_idle: bool = False
     wait: Optional[int] = None
@@ -81,164 +66,155 @@ class ScrapeRequest(BaseModel):
     allow_webgl: bool = False
 
 
+def extract_content(
+    html: str,
+    extraction_type: str,
+    css_selector: Optional[str],
+    main_content_only: bool,
+) -> str:
+    """Extract content from HTML using BeautifulSoup, mirroring Scrapling's Convertor."""
+    soup = BeautifulSoup(html, "lxml")
+
+    # Remove script, style, nav, footer, header noise if main_content_only
+    if main_content_only:
+        for tag in soup.find_all(["script", "style", "noscript", "nav", "footer", "aside", "iframe"]):
+            tag.decompose()
+
+    # Apply CSS selector if provided
+    target = soup
+    if css_selector:
+        selected = soup.select(css_selector)
+        if selected:
+            new_soup = BeautifulSoup("", "lxml")
+            for el in selected:
+                new_soup.append(el)
+            target = new_soup
+
+    if main_content_only:
+        # Try to find the main content area
+        body = target.find("body")
+        if body:
+            # Look for common main content containers
+            main = (
+                body.find("main")
+                or body.find("article")
+                or body.find(attrs={"role": "main"})
+                or body.find(id="content")
+                or body.find(id="main")
+                or body.find(class_="content")
+            )
+            if main:
+                target = main
+
+    html_str = str(target)
+
+    if extraction_type == "html":
+        return html_str
+    elif extraction_type == "markdown":
+        return md(html_str, heading_style="ATX", strip=["img"])
+    else:
+        # plain text
+        text = target.get_text(separator="\n", strip=True)
+        # Collapse multiple blank lines
+        lines = text.splitlines()
+        result = []
+        prev_blank = False
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                if not prev_blank:
+                    result.append("")
+                prev_blank = True
+            else:
+                result.append(stripped)
+                prev_blank = False
+        return "\n".join(result)
+
+
 @app.get("/api/health")
 async def health():
     return {
         "status": "ok",
-        "available_fetchers": AVAILABLE_FETCHERS,
-        "convertor_available": CONVERTOR_AVAILABLE,
+        "available_fetchers": {
+            "fetcher": True,
+            "dynamic": False,
+            "stealthy": False,
+        },
+        "convertor_available": True,
+        "note": "Running with httpx backend. Dynamic and Stealthy fetchers require Playwright/Camoufox.",
     }
-
-
-def extract_content(response, extraction_type, css_selector, main_content_only):
-    """Extract content from a Scrapling response object."""
-    if CONVERTOR_AVAILABLE:
-        try:
-            parts = list(
-                Convertor._extract_content(
-                    response,
-                    extraction_type=extraction_type,
-                    css_selector=css_selector,
-                    main_content_only=main_content_only,
-                )
-            )
-            return "".join(parts)
-        except Exception:
-            pass
-
-    # Fallback: return the response text/body directly
-    text = ""
-    if hasattr(response, "text"):
-        text = response.text
-    elif hasattr(response, "body"):
-        text = response.body if isinstance(response.body, str) else response.body.decode("utf-8", errors="replace")
-
-    if extraction_type == "html":
-        return text
-    # For markdown/text without Convertor, just return raw text
-    return text
-
-
-def serialize_response(response):
-    """Safely serialize response headers and cookies."""
-    headers_data = {}
-    if hasattr(response, "headers") and response.headers:
-        try:
-            headers_data = dict(response.headers) if not isinstance(response.headers, dict) else response.headers
-        except Exception:
-            headers_data = {}
-
-    cookies_data = {}
-    if hasattr(response, "cookies") and response.cookies:
-        try:
-            if isinstance(response.cookies, dict):
-                cookies_data = response.cookies
-            elif hasattr(response.cookies, "items"):
-                cookies_data = dict(response.cookies)
-        except Exception:
-            cookies_data = {}
-
-    return headers_data, cookies_data
 
 
 @app.post("/api/scrape")
 async def scrape(req: ScrapeRequest):
     start_time = time.time()
 
-    if not AVAILABLE_FETCHERS.get(req.fetcher_type, False):
-        available = [k for k, v in AVAILABLE_FETCHERS.items() if v]
-        return fastapi.responses.JSONResponse(
+    # Dynamic and Stealthy require browser engines not available here
+    if req.fetcher_type in ("dynamic", "stealthy"):
+        elapsed = round(time.time() - start_time, 3)
+        return JSONResponse(
             status_code=400,
             content={
-                "error": f"Fetcher '{req.fetcher_type}' is not available in this environment. Available: {available or 'none'}",
-                "elapsed": round(time.time() - start_time, 3),
+                "error": f"'{req.fetcher_type}' fetcher requires browser engines (Playwright/Camoufox) which are not available in this environment. Use 'fetcher' for HTTP-based scraping.",
+                "elapsed": elapsed,
             },
         )
 
     try:
+        # Build request headers
+        request_headers = dict(DEFAULT_HEADERS) if req.stealthy_headers else {}
+        if req.headers:
+            request_headers.update(req.headers)
+
+        # Build httpx client kwargs
+        client_kwargs: dict = {
+            "timeout": float(req.timeout or 30),
+            "follow_redirects": req.follow_redirects,
+            "headers": request_headers,
+        }
+        if req.proxy:
+            client_kwargs["proxy"] = req.proxy
+
+        # Retry logic matching Scrapling's Fetcher behavior
+        last_exc = None
         response = None
+        retries = req.retries or 0
 
-        if req.fetcher_type == "fetcher":
-            from scrapling.fetchers import Fetcher
+        for attempt in range(retries + 1):
+            try:
+                async with httpx.AsyncClient(**client_kwargs) as client:
+                    method_fn = getattr(client, req.method.lower(), client.get)
+                    response = await method_fn(
+                        req.url,
+                        cookies=req.cookies or None,
+                    )
+                break
+            except Exception as e:
+                last_exc = e
+                if attempt < retries:
+                    import asyncio
+                    await asyncio.sleep(req.retry_delay or 1)
 
-            method_kwargs = {
-                "timeout": req.timeout,
-                "retries": req.retries,
-                "retry_delay": req.retry_delay,
-                "follow_redirects": req.follow_redirects,
-                "stealthy_headers": req.stealthy_headers,
-            }
-            if req.impersonate:
-                method_kwargs["impersonate"] = req.impersonate
-            if req.proxy:
-                method_kwargs["proxy"] = req.proxy
-            if req.headers:
-                method_kwargs["headers"] = req.headers
-            if req.cookies:
-                method_kwargs["cookies"] = req.cookies
-            if req.http3:
-                method_kwargs["http3"] = True
+        if response is None:
+            raise last_exc or Exception("Request failed after all retries")
 
-            method_fn = getattr(Fetcher, req.method.lower(), Fetcher.get)
-            response = method_fn(req.url, **method_kwargs)
-
-        elif req.fetcher_type == "dynamic":
-            from scrapling.fetchers import DynamicFetcher
-
-            fetch_kwargs = {
-                "headless": req.headless,
-                "network_idle": req.network_idle,
-                "timeout": req.timeout,
-                "disable_resources": req.disable_resources,
-                "google_search": req.google_search,
-            }
-            if req.proxy:
-                fetch_kwargs["proxy"] = {"server": req.proxy}
-            if req.wait:
-                fetch_kwargs["wait"] = req.wait
-            if req.wait_selector:
-                fetch_kwargs["wait_selector"] = req.wait_selector
-
-            response = DynamicFetcher.fetch(req.url, **fetch_kwargs)
-
-        elif req.fetcher_type == "stealthy":
-            from scrapling.fetchers import StealthyFetcher
-
-            fetch_kwargs = {
-                "headless": req.headless,
-                "network_idle": req.network_idle,
-                "timeout": req.timeout,
-                "disable_resources": req.disable_resources,
-                "google_search": req.google_search,
-                "block_webrtc": req.block_webrtc,
-                "allow_webgl": req.allow_webgl,
-                "hide_canvas": req.hide_canvas,
-            }
-            if req.proxy:
-                fetch_kwargs["proxy"] = {"server": req.proxy}
-            if req.wait:
-                fetch_kwargs["wait"] = req.wait
-            if req.wait_selector:
-                fetch_kwargs["wait_selector"] = req.wait_selector
-            if req.solve_cloudflare:
-                fetch_kwargs["solve_cloudflare"] = True
-
-            response = StealthyFetcher.fetch(req.url, **fetch_kwargs)
-
+        # Extract content
         content = extract_content(
-            response,
+            html=response.text,
             extraction_type=req.extraction_type,
             css_selector=req.css_selector,
             main_content_only=req.main_content_only,
         )
 
-        headers_data, cookies_data = serialize_response(response)
+        # Serialize response data
+        headers_data = dict(response.headers)
+        cookies_data = {k: v for k, v in response.cookies.items()}
         elapsed = round(time.time() - start_time, 3)
 
         return {
-            "status": getattr(response, "status", 0),
-            "reason": getattr(response, "reason", ""),
-            "url": getattr(response, "url", req.url),
+            "status": response.status_code,
+            "reason": response.reason_phrase or "",
+            "url": str(response.url),
             "content": content,
             "headers": headers_data,
             "cookies": cookies_data,
@@ -247,7 +223,7 @@ async def scrape(req: ScrapeRequest):
 
     except Exception as e:
         elapsed = round(time.time() - start_time, 3)
-        return fastapi.responses.JSONResponse(
+        return JSONResponse(
             status_code=500,
             content={
                 "error": str(e),

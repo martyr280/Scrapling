@@ -38,12 +38,10 @@ export default function App() {
         const res = await fetch('/api/health')
         if (res.ok && !cancelled) {
           const data = await res.json()
-          console.log("[v0] Backend health:", data)
           setHealth(data)
           setBackendReady(true)
         }
       } catch (err) {
-        console.log("[v0] Backend not ready yet:", err)
         if (!cancelled) {
           setTimeout(checkHealth, 2000)
         }
