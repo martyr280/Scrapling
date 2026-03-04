@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react'
-import { Send, RotateCcw, FileCode, Hash, SlidersHorizontal, Braces } from 'lucide-react'
+import { useState, useCallback, useEffect } from 'react'
+import { Send, RotateCcw, FileCode, SlidersHorizontal, Braces } from 'lucide-react'
 import FetcherSelector from './components/FetcherSelector'
 import HeaderEditor from './components/HeaderEditor'
 import OptionsPanel from './components/OptionsPanel'
@@ -16,6 +16,11 @@ const HTTP_METHODS: { value: HttpMethod; label: string; color: string }[] = [
   { value: 'delete', label: 'DELETE', color: 'text-status-error' },
 ]
 
+interface HealthInfo {
+  available_fetchers: Record<string, boolean>
+  convertor_available: boolean
+}
+
 export default function App() {
   const [request, setRequest] = useState<ScrapeRequest>({ ...DEFAULT_REQUEST })
   const [response, setResponse] = useState<ScrapeResponse | null>(null)
@@ -23,6 +28,30 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [configTab, setConfigTab] = useState<ConfigTab>('basic')
   const [headerPairs, setHeaderPairs] = useState<HeaderPair[]>([])
+  const [health, setHealth] = useState<HealthInfo | null>(null)
+  const [backendReady, setBackendReady] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    const checkHealth = async () => {
+      try {
+        const res = await fetch('/api/health')
+        if (res.ok && !cancelled) {
+          const data = await res.json()
+          console.log("[v0] Backend health:", data)
+          setHealth(data)
+          setBackendReady(true)
+        }
+      } catch (err) {
+        console.log("[v0] Backend not ready yet:", err)
+        if (!cancelled) {
+          setTimeout(checkHealth, 2000)
+        }
+      }
+    }
+    checkHealth()
+    return () => { cancelled = true }
+  }, [])
 
   const updateRequest = useCallback((updates: Partial<ScrapeRequest>) => {
     setRequest((prev) => ({ ...prev, ...updates }))
@@ -103,13 +132,27 @@ export default function App() {
             <p className="text-[11px] text-zinc-500">Web Scraping Interface</p>
           </div>
         </div>
-        <button
-          onClick={handleReset}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 rounded-lg hover:bg-surface-200 transition-colors cursor-pointer"
-        >
-          <RotateCcw size={13} />
-          Reset
-        </button>
+        <div className="flex items-center gap-3">
+          {!backendReady && (
+            <span className="flex items-center gap-1.5 text-xs text-amber-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+              Connecting to backend...
+            </span>
+          )}
+          {backendReady && health && (
+            <span className="flex items-center gap-1.5 text-xs text-emerald-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+              Backend ready
+            </span>
+          )}
+          <button
+            onClick={handleReset}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 rounded-lg hover:bg-surface-200 transition-colors cursor-pointer"
+          >
+            <RotateCcw size={13} />
+            Reset
+          </button>
+        </div>
       </header>
 
       {/* Main Content */}

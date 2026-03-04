@@ -2,9 +2,12 @@
 name = "backend"
 version = "0.1.0"
 description = "Scrapling web interface backend"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 dependencies = [
-    "fastapi[standard]>=0.128.1",
-    "scrapling[fetchers]>=0.4.0",
+    "fastapi[standard]>=0.115.0",
     "markdownify>=0.14.1",
+    "lxml>=5.0.0",
+    "cssselect>=1.2.0",
+    "curl_cffi>=0.7.0",
+    "orjson>=3.9.0",
 ]
